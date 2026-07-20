@@ -18,7 +18,8 @@ for dataset provenance and schema.
 Phase 1 (data + model, no app/reporting layer) complete: `ingest.py`,
 `faults.py`, `features.py`, `model.py`, `evaluate.py`, `pipeline.py`, 20 unit
 tests + 1 integration test, all passing. Validated against ~1.13 hours of
-real LBNL µPMU data (see Results below), not just synthetic fixtures.
+real LBNL µPMU data (see Results below), not just synthetic fixtures, and
+scaled up to a full day (10.37M rows, see Scaling below).
 
 ## Setup
 
@@ -100,3 +101,42 @@ reality).
    four fault types are 100% caught by that measure. Point-wise recall is
    still worth keeping alongside it: it distinguishes a precise single-row
    catch from a detector that lit up the whole window indiscriminately.
+
+## Scaling (real data, 1-day slice)
+
+The full two-channel dataset (120M rows each, L1MAG + LSTATE) OOM'd during
+`ingest.load_upmu_site()`'s merge step alone — before any modeling — on this
+project's 7.6GB-RAM environment (peak RSS hit 6.4GB with only 558MB
+system-wide free). Rather than rewrite ingestion around chunking/streaming
+or drop to float32, scaled back to a bounded one-day slice (10,368,000 rows,
+~21x the 487K-row test above) as the practical scale-up target.
+
+Result: `pipeline.run()` completes with no memory pressure (peak RSS 3.3GB,
+well under the 6.6GB available) and all four fault types are still caught
+at the window level:
+
+| fault type          | fraction of window flagged | caught at all |
+|----------------------|------------------------------|-----------------|
+| `timestamp_jitter`   | 100% | yes |
+| `tq_corruption`       | 100% | yes |
+| `dropout`             | 33% | yes |
+| `clock_step`           | 25% | yes |
+
+Overall (point-wise): precision 0.0077%, recall 61.5%, F1 0.0154% — same
+pattern as the smaller-scale run (contamination flags ~1% of all 10.37M
+rows, so precision against this narrow synthetic ground truth stays low by
+construction).
+
+The cost is time, not memory: `model.build_pipeline()`'s default
+`max_samples=1.0` (full-dataset IsolationForest subsampling, needed per
+finding #1 above) took ~593s (~10 min) for model fit+predict alone, single-
+threaded and CPU-bound. That's an acceptable trade at this scale — detection
+quality was unaffected — so no sampling-strategy rework was needed here.
+Parallelizing via `n_jobs=-1` is the natural next lever if faster iteration
+becomes necessary, but wasn't pursued since nothing was blocking on it.
+
+Scaling further (the full 120M-row dataset, or a distributed/chunked
+rewrite) is deferred — 1-day real-data validation plus the earlier
+same-hour test is considered sufficient evidence for Phase 1. External
+validation against labeled real GPS-clock-error data (GESL) is also
+deferred to a later phase.
