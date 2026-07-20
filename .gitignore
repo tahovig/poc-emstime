@@ -43,5 +43,10 @@ data/raw/
 # App-generated run artifacts (DB, fitted models) - not source, not data
 data/app/
 
+# Frontend build output / dependencies
+code/frontend/node_modules/
+code/frontend/dist/
+code/frontend/*.tsbuildinfo
+
 # Claude Code local settings (machine-specific, not shared)
 .claude/settings.local.json

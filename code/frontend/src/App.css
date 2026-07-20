@@ -1,0 +1,28 @@
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.app-title {
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: #111827;
+  text-decoration: none;
+}
+
+.new-run-link {
+  color: #1d4ed8;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.app-main {
+  padding: 1.5rem;
+}
+
+.error {
+  color: #b91c1c;
+}
