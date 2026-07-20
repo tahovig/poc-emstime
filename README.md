@@ -16,7 +16,7 @@ for dataset provenance and schema.
 ## Status
 
 Phase 1 (data + model, no app/reporting layer) complete: `ingest.py`,
-`faults.py`, `features.py`, `model.py`, `evaluate.py`, `pipeline.py`, 17 unit
+`faults.py`, `features.py`, `model.py`, `evaluate.py`, `pipeline.py`, 20 unit
 tests + 1 integration test, all passing. Validated against ~1.13 hours of
 real LBNL µPMU data (see Results below), not just synthetic fixtures.
 
@@ -36,29 +36,31 @@ file listing and confirmed schema.
 
 ## Results (real data)
 
-Ran `pipeline.run()` against ~1.13 hours of real LBNL `a6_bus1` data (487,640
+Ran `pipeline.run()` against ~1.13 hours of real LBNL `a6_bus1` data (487,667
 rows at 120Hz: real `L1MAG` voltage magnitude + real `LSTATE` as the TQ
-column), with one injected fault of each type. Detection rate (recall) per
-fault type:
+column), with one injected fault of each type. Two detection metrics per
+fault type — see the "point-wise vs window-level" finding below for why both
+are reported:
 
-| fault type         | detected |
-|---------------------|----------|
-| `timestamp_jitter`  | 100% |
-| `tq_corruption`      | 100% |
-| `dropout`            | 0% |
-| `clock_step`          | 0% |
+| fault type          | fraction of window flagged | caught at all |
+|----------------------|------------------------------|-----------------|
+| `timestamp_jitter`   | 100% | yes |
+| `tq_corruption`       | 100% | yes |
+| `dropout`             | 33% | yes |
+| `clock_step`           | 25% | yes |
 
-Overall: precision 0.12%, recall 60%, F1 0.25% (`contamination=0.01` flags
-~1% of all 487,640 rows — most flags are real electrical events in the data,
-not the ~16 rows belonging to injected faults, so precision against *this*
-synthetic ground truth is expected to be low; it isn't a claim that those
-other flagged rows are false alarms in reality).
+Overall (point-wise): precision 0.16%, recall 62%, F1 0.33%
+(`contamination=0.01` flags ~1% of all 487,667 rows — most flags are real
+electrical events in the data, not the ~16 rows belonging to injected
+faults, so precision against *this* synthetic ground truth is expected to be
+low; it isn't a claim that those other flagged rows are false alarms in
+reality).
 
-**Two real findings, not tuned away:**
+**Three real findings from this investigation, none tuned away:**
 
 1. **IsolationForest's default row-subsampling made rare faults nearly
    invisible.** sklearn's default `max_samples='auto'` caps each tree's
-   training subsample at 256 rows. Against 487,640 rows, a 3-4-row fault
+   training subsample at 256 rows. Against 487,667 rows, a 3-4-row fault
    has under a 1-in-500 chance of landing in any given tree's subsample —
    so almost no tree ever learns to split around it. This held even for the
    TQ-flag corruption, which is ~400 standard deviations from baseline.
@@ -67,15 +69,34 @@ other flagged rows are false alarms in reality).
    Doesn't scale to the full multi-day dataset as-is (100 trees x millions
    of rows) — future work should use stratified/weighted sampling instead.
 
-2. **`dropout` and `clock_step` are still undetected — root cause identified,
-   not yet fixed.** A short gap under `ffill_limit` still leaves real `NaN`s
-   in the value column, which propagate through the next `window - 1` rows
-   of every rolling feature (`rolling(10)` touches its previous 9 rows).
-   `dropna(subset=feature_cols)` then drops those rows outright — including
-   the exact row where the gap's evidence (`Time_Delta_ms` spiking to ~5x
-   nominal) is strongest. The anomaly is real and large, but it gets deleted
-   before the model ever sees it. Fixing this (e.g., excluding `Time_Delta_ms`
-   from the rolling-NaN-driven drop, or evaluating gap detection at the
-   reindexed/`Was_Filled` row instead of relying on `dropna` survivors) is
-   scoped as follow-up work, not patched here to avoid inflating the numbers
-   above.
+2. **`dropout` and `clock_step` weren't undetected — they were mislabeled.**
+   Checking the model's raw anomaly scores directly (not just the
+   contamination-thresholded flags) showed the dropout resumption row
+   ranked **1st most anomalous of all 487,667 rows**, and the clock_step
+   boundary row ranked **2nd** — both essentially perfect catches. But both
+   fell one sample *after* the fault window's original `end`, because a gap
+   or clock-step's evidence (an abnormal `Time_Delta_ms`) only appears once
+   time resumes to normal — the labeled window itself, `[start, end]`,
+   never contains it. `evaluate.py`'s point-wise scoring checked the wrong
+   rows. Fixed in `faults.py`: `inject_dropout` now pads the label's `end`
+   by one nominal sample interval, and `inject_clock_step` pads both `start`
+   and `end`, since a step is a discontinuity at *both* transitions. Also
+   fixed the demo's default `clock_step` offset (was 50ms, an exact multiple
+   of the 8.333ms sample interval — shifted rows landed exactly on existing
+   timestamps and got silently deduplicated in `regularize()` before
+   reaching the model; changed to 33.5ms) and stopped `pipeline.py` from
+   dropping a row outright just because a rolling-window stat touching an
+   upstream gap was `NaN` — `Time_Delta_ms` next to it was still valid
+   evidence being thrown away for no reason.
+
+3. **A single precise catch can still look like a low detection rate.**
+   Even after the fix above, `dropout`/`clock_step` show 25-33% in the
+   "fraction of window flagged" column — because only the one boundary
+   *transition* row in each 3-4-row padded window is genuinely anomalous;
+   correctly *not* flagging the other rows (which are either missing or
+   just normally-spaced-but-shifted values) drags the per-row average down
+   despite catching the fault. Added `evaluate.window_level_recall()` to
+   report the coarser "was the fault caught at all" question directly — all
+   four fault types are 100% caught by that measure. Point-wise recall is
+   still worth keeping alongside it: it distinguishes a precise single-row
+   catch from a detector that lit up the whole window indiscriminately.

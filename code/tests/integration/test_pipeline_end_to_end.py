@@ -24,3 +24,8 @@ def test_pipeline_runs_end_to_end_and_produces_scored_metrics():
     assert set(by_type.keys()) <= {"dropout", "timestamp_jitter", "clock_step", "tq_corruption"}
     for value in by_type.values():
         assert 0.0 <= value <= 1.0
+
+    window_recall = results["window_level_recall"]
+    assert set(window_recall.keys()) == set(by_type.keys())
+    for value in window_recall.values():
+        assert isinstance(value, bool)

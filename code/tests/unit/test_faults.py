@@ -43,6 +43,28 @@ def test_inject_clock_step_shifts_timestamps_in_window_only():
     assert (out.index[:5] == df.index[:5]).all()
 
 
+def test_inject_dropout_pads_window_end_by_one_nominal_interval():
+    # the gap is only detectable once time resumes, one row past `end` —
+    # the label needs to cover that row for evaluation to credit it
+    df = _clean_df()
+    start, end = df.index[5], df.index[10]
+    nominal_interval = df.index.to_series().diff().median()
+    _, window = inject_dropout(df, start, end)
+    assert window[0] == pd.Timestamp(start)
+    assert window[1] == pd.Timestamp(end) + nominal_interval
+
+
+def test_inject_clock_step_pads_window_both_sides_by_one_nominal_interval():
+    # the discontinuity shows up at the transitions into/out of the shifted
+    # region, not uniformly across the window's interior
+    df = _clean_df()
+    start, end = df.index[5], df.index[10]
+    nominal_interval = df.index.to_series().diff().median()
+    _, window = inject_clock_step(df, start, end, offset_ms=33.5)
+    assert window[0] == pd.Timestamp(start) - nominal_interval
+    assert window[1] == pd.Timestamp(end) + nominal_interval
+
+
 def test_inject_tq_corruption_sets_flag_in_window():
     df = _clean_df()
     start, end = df.index[5], df.index[10]
