@@ -1,0 +1,12 @@
+01 - Time and Grid Analysis
+
+To build a local machine learning model for power grid time-series data, you need to handle sub-second timestamp formatting, handle missing steps, and extract rolling features. High-frequency synchrophasor data (often 30 to 120 samples per second) frequently exhibits anomalies like GPS signal loss or jitter, which appear as rapid state changes or sudden invalid data flags.
+
+See poc_emstime-ml_learning_template.py for a complete Python framework utilizing Pandas and Scikit-Learn. It parses sub-second timestamps, engineers rolling features, and trains an Isolation Forest—an unsupervised machine learning model perfectly suited for detecting anomalous grid behavior and clock errors without requiring millions of labeled rows.
+
+
+02 - Critical Elements for the Custom Implementation
+
+When you swap out the mock file for a live dataset from sources like the Grid Event Signature Library or Texas A&M Synthetic PMU Data, keep these nuances in mind: The Time Quality Flag: Real PMU data streams include a status word containing bits explicitly dedicated to Time Quality (TQ). Always extract this column. If a satellite clock drops lock, this flag changes value before the telemetry data itself degrades, making it an excellent feature to feed directly into your classifier. Phase Angle Unwrapping: If you are analyzing Phase Angles instead of frequency, the raw values will oscillate between -180° and +180° or 0 and 2π. Before calculating differences or standard deviations, you must use np.unwrap() to prevent fake anomaly spikes when the angle wraps around its limit.
+
+

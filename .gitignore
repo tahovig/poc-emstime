@@ -1,0 +1,44 @@
+# Byte-compiled / optimized files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+poc-emstime-venv/
+
+# Environment variables / secrets
+.env
+.env.*
+
+# Testing / tooling caches
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Raw downloaded dataset (large, not ours to redistribute)
+data/raw/
+
+# Claude Code local settings (machine-specific, not shared)
+.claude/settings.local.json

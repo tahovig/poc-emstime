@@ -1,0 +1,33 @@
+[project]
+name = "poc-emstime"
+version = "0.1.0"
+description = "ML pipeline for sub-second power-grid time-series anomaly detection (satellite clock / GPS timing faults)"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "scikit-learn>=1.4",
+    "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.scripts]
+poc-emstime = "poc_emstime.pipeline:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: runs the full pipeline against tests/fixtures/ data",
+]
+addopts = "-m 'not integration'"
