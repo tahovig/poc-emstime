@@ -155,6 +155,8 @@ def _process(job: RunJob) -> None:
         heartbeat_thread.join(timeout=config.HEARTBEAT_INTERVAL_S + 1)
         with db.get_session() as session:
             run = session.get(Run, run_id)
+            if run is None:  # deleted mid-flight
+                return
             run.status = "failed"
             run.error_message = f"{type(exc).__name__}: {exc}"
             run.completed_at = datetime.now(timezone.utc)
@@ -181,6 +183,8 @@ def _process(job: RunJob) -> None:
 
     with db.get_session() as session:
         run = session.get(Run, run_id)
+        if run is None:  # deleted mid-flight
+            return
         run.status = "completed"
         run.completed_at = datetime.now(timezone.utc)
         run.duration_s = round(time.monotonic() - start_time, 1)

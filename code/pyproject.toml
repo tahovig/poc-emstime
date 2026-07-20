@@ -14,13 +14,17 @@ dependencies = [
 [project.optional-dependencies]
 app = [
     "sqlmodel>=0.0.22",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
 ]
 dev = [
     "pytest>=8.0",
+    "httpx>=0.27",
 ]
 
 [project.scripts]
 poc-emstime = "poc_emstime.pipeline:main"
+poc-emstime-app = "poc_emstime.app.main:serve"
 
 [build-system]
 requires = ["setuptools>=68"]
