@@ -21,7 +21,7 @@ jobs:
 
       - name: Install package + dev dependencies
         working-directory: code
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[app,dev]"
 
       - name: Run unit tests
         working-directory: code
@@ -38,7 +38,7 @@ jobs:
 
       - name: Install package + dev dependencies
         working-directory: code
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[app,dev]"
 
       - name: Run integration tests against fixture data
         working-directory: code

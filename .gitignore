@@ -40,5 +40,8 @@ Thumbs.db
 # Raw downloaded dataset (large, not ours to redistribute)
 data/raw/
 
+# App-generated run artifacts (DB, fitted models) - not source, not data
+data/app/
+
 # Claude Code local settings (machine-specific, not shared)
 .claude/settings.local.json

@@ -11,6 +11,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+app = [
+    "sqlmodel>=0.0.22",
+]
 dev = [
     "pytest>=8.0",
 ]
