@@ -1,0 +1,10 @@
+.anomaly-chart {
+  width: 100%;
+  max-width: 900px;
+}
+
+.anomaly-chart__note {
+  font-size: 0.8rem;
+  color: #6b7280;
+  max-width: 900px;
+}

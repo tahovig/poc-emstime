@@ -5,6 +5,7 @@ just enough wiring to prove the pipeline works end to end.
 """
 
 import argparse
+from typing import Callable, Optional
 
 import pandas as pd
 
@@ -28,16 +29,35 @@ def default_fault_spec(index: pd.DatetimeIndex, tq_col: str) -> list[dict]:
     ]
 
 
-def run(channel_paths: dict[str, str], target_col: str, tq_col: str = "TQ", window: int = 10) -> dict:
+def run(
+    channel_paths: dict[str, str],
+    target_col: str,
+    tq_col: str = "TQ",
+    window: int = 10,
+    contamination: float = 0.01,
+    n_estimators: int = 100,
+    random_state: int = 42,
+    max_samples: float = 1.0,
+    progress_callback: Optional[Callable[[str], None]] = None,
+) -> dict:
+    def _emit(stage: str) -> None:
+        if progress_callback is not None:
+            progress_callback(stage)
+
+    _emit("loading_channels")
     df = ingest.load_upmu_site(channel_paths)
     if tq_col not in df.columns:
         df[tq_col] = 0.0  # synthesize an "always good" TQ column when the real data has none
 
+    _emit("injecting_faults")
     spec = default_fault_spec(df.index, tq_col)
     df, labels = faults.inject_faults(df, spec)
 
+    _emit("computing_gap_features")
     df = ingest.add_gap_features(df)
+    _emit("regularizing")
     df = ingest.regularize(df)
+    _emit("engineering_features")
     df = features.add_delta_and_rolling(df, target_col, window)
 
     feature_cols = [
@@ -48,6 +68,7 @@ def run(channel_paths: dict[str, str], target_col: str, tq_col: str = "TQ", wind
         "Time_Delta_ms",
         tq_col,
     ]
+    _emit("cleaning_rows")
     # A short gap leaves real NaNs in target_col beyond ffill_limit, which
     # then propagate through the next window-1 rows of every rolling stat.
     # Those rolling-derived NaNs don't mean the row is unusable — Time_Delta_ms
@@ -58,9 +79,16 @@ def run(channel_paths: dict[str, str], target_col: str, tq_col: str = "TQ", wind
     df[rolling_cols] = df[rolling_cols].fillna(0.0)
     df = df.dropna(subset=[target_col, "Time_Delta_ms", tq_col])
 
-    pipeline = model.build_pipeline()
+    _emit("fitting_and_scoring")
+    pipeline = model.build_pipeline(
+        contamination=contamination,
+        n_estimators=n_estimators,
+        random_state=random_state,
+        max_samples=max_samples,
+    )
     y_pred = model.detect_anomalies(pipeline, df[feature_cols].values)
 
+    _emit("finalizing_metrics")
     y_true = evaluate.ground_truth_mask(df.index, labels)
     return {
         "overall": evaluate.score(y_true, y_pred),
@@ -68,6 +96,13 @@ def run(channel_paths: dict[str, str], target_col: str, tq_col: str = "TQ", wind
         "window_level_recall": evaluate.window_level_recall(df.index, labels, y_pred),
         "n_rows": len(df),
         "n_flagged": int(y_pred.sum()),
+        "model": pipeline,
+        "index": df.index,
+        "y_pred": y_pred,
+        "target_series": df[target_col].to_numpy(),
+        "time_delta_ms": df["Time_Delta_ms"].to_numpy(),
+        "labels": labels,
+        "feature_cols": feature_cols,
     }
 
 
