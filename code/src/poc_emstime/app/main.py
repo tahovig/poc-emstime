@@ -1,15 +1,16 @@
-"""FastAPI app: lifespan wiring (DB init, background worker) and API routers.
-
-SPA static-file/fallback serving for the single-command demo path is added
-in a later milestone, once there's a built frontend to serve.
+"""FastAPI app: lifespan wiring (DB init, background worker), API routers,
+and -- once a frontend build exists -- static/SPA-fallback serving so a
+single process can demo the whole app on one port.
 """
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
-from poc_emstime.app import db, jobs
+from poc_emstime.app import config, db, jobs
 from poc_emstime.app.routers import datasets, runs
 
 
@@ -36,6 +37,27 @@ app.include_router(runs.router, prefix="/api")
 @app.get("/api/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+FRONTEND_DIST = config.REPO_ROOT / "code" / "frontend" / "dist"
+
+# Only wired up once `npm run build` has actually produced dist/ -- in dev
+# mode there's no build yet, and StaticFiles raises at startup if its
+# directory doesn't exist, so this stays optional rather than assumed.
+if FRONTEND_DIST.is_dir():
+    app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def spa_fallback(full_path: str):
+        # A client-side route (e.g. /runs/7) has no matching server route
+        # of its own -- Starlette's StaticFiles(html=True) only serves
+        # index.html at the exact root, not arbitrary deep links, so this
+        # catch-all is what makes a browser refresh on /runs/7 still work.
+        # Anything under /api/ that reached here matched no real endpoint
+        # and should 404 as JSON, not silently return the SPA shell.
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="not found")
+        return FileResponse(FRONTEND_DIST / "index.html")
 
 
 def serve() -> None:
