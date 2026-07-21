@@ -1,17 +1,35 @@
+import { useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRunDetail } from "../api/useRunDetail";
+import { useRunChart } from "../api/useRunChart";
+import { useRunProgress } from "../api/useRunProgress";
 import StatusBadge from "../components/StatusBadge";
 import MetricsCard from "../components/MetricsCard";
 import FaultTypeTable from "../components/FaultTypeTable";
+import RunProgressPanel from "../components/RunProgressPanel";
+import AnomalyChart from "../components/AnomalyChart";
 import "./RunDetailPage.css";
 
-// Progress streaming (SSE) and the anomaly-score chart land in a later
-// milestone; this page polls the plain REST endpoint for now, which is
-// enough to watch a run go queued -> running -> completed.
 export default function RunDetailPage() {
   const { runId } = useParams<{ runId: string }>();
   const id = Number(runId);
+  const queryClient = useQueryClient();
+
   const { data: run, isLoading, error } = useRunDetail(id);
+
+  // The SSE stream is opened regardless of the run's current status (it
+  // handles the "already finished" case itself, see routers/runs.py). Its
+  // terminal event is what tells this page to fetch the final REST detail
+  // once, rather than polling on a timer.
+  const onTerminal = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ["run", id] });
+    queryClient.invalidateQueries({ queryKey: ["runs"] });
+  }, [queryClient, id]);
+  const progress = useRunProgress(id, onTerminal);
+
+  const chartEnabled = run?.status === "completed";
+  const { data: chart } = useRunChart(id, chartEnabled);
 
   if (isLoading) return <p>Loading run…</p>;
   if (error) return <p className="error">Failed to load run: {(error as Error).message}</p>;
@@ -28,9 +46,7 @@ export default function RunDetailPage() {
 
       {run.status === "failed" && run.error_message && <p className="error">{run.error_message}</p>}
 
-      {(run.status === "queued" || run.status === "running") && (
-        <p className="run-detail__pending-note">Run in progress ({run.status}) — this page refreshes automatically.</p>
-      )}
+      {(run.status === "queued" || run.status === "running") && <RunProgressPanel event={progress.latest} />}
 
       {run.status === "completed" && (
         <>
@@ -42,8 +58,12 @@ export default function RunDetailPage() {
             <MetricsCard label="F1" value={`${(run.f1! * 100).toFixed(2)}%`} />
             <MetricsCard label="Duration" value={`${run.duration_s}s`} />
           </div>
+
           <h3>By fault type</h3>
           <FaultTypeTable byFaultType={run.by_fault_type} windowLevelRecall={run.window_level_recall} />
+
+          <h3>Anomaly score over time</h3>
+          {chart ? <AnomalyChart chart={chart} /> : <p>Loading chart…</p>}
         </>
       )}
 

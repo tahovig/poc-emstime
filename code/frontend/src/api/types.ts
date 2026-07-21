@@ -44,3 +44,18 @@ export interface RunCreateRequest {
   n_estimators?: number;
   random_state?: number;
 }
+
+export interface FaultWindow {
+  start_ms: number;
+  end_ms: number;
+  fault_type: string;
+}
+
+export interface ChartData {
+  timestamps: number[];
+  values: number[];
+  anomaly: boolean[];
+  fault_windows: FaultWindow[];
+  n_rows_full: number;
+  n_anomalies_full: number;
+}

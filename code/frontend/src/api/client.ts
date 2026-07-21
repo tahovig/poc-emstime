@@ -1,4 +1,4 @@
-import type { DatasetOption, RunCreateRequest, RunDetail, RunSummary } from "./types";
+import type { ChartData, DatasetOption, RunCreateRequest, RunDetail, RunSummary } from "./types";
 
 const BASE_URL = "/api";
 
@@ -21,6 +21,7 @@ export const api = {
   listDatasets: () => request<DatasetOption[]>("/datasets"),
   listRuns: () => request<RunSummary[]>("/runs"),
   getRun: (id: number) => request<RunDetail>(`/runs/${id}`),
+  getRunChart: (id: number) => request<ChartData>(`/runs/${id}/chart`),
   createRun: (payload: RunCreateRequest) =>
     request<RunSummary>("/runs", { method: "POST", body: JSON.stringify(payload) }),
   deleteRun: (id: number) => request<void>(`/runs/${id}`, { method: "DELETE" }),
