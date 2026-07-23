@@ -21,6 +21,10 @@ dev = [
     "pytest>=8.0",
     "httpx>=0.27",
 ]
+gesl = [
+    "httpx>=0.27",
+    "python-dotenv>=1.2",
+]
 
 [project.scripts]
 poc-emstime = "poc_emstime.pipeline:main"

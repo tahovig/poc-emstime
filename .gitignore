@@ -18,6 +18,7 @@ poc-emstime-venv/
 # Environment variables / secrets
 .env
 .env.*
+!.env.example
 
 # Testing / tooling caches
 .pytest_cache/
@@ -42,6 +43,9 @@ data/raw/
 
 # App-generated run artifacts (DB, fitted models) - not source, not data
 data/app/
+
+# GESL downloaded signatures (real, license unconfirmed - not ours to redistribute)
+data/gesl/
 
 # Frontend build output / dependencies
 code/frontend/node_modules/
