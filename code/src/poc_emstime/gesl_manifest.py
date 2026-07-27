@@ -109,8 +109,23 @@ TIMING_SIGNATURES: tuple[SignatureRef, ...] = (
     ),
 )
 
-# Non-Timing-tagged Data Quality signatures, sampled once (fixed seed) as a
-# negative control -- populated in M5 by querying the documented
-# `output: "sigids", sigtype: "data quality"` endpoint and excluding the 14
-# IDs above. Empty until then.
-NEGATIVE_CONTROL_SIGIDS: tuple[int, ...] = ()
+# Non-Timing Data Quality signatures, for measuring false-positive rate.
+#
+# Discovered via the documented `output: "sigids", sigtype: "data quality"`
+# endpoint. Its "no criteria" 400 error means at least one filter is
+# required; `sensor: ["PMU"]` returned all 123 PMU-sourced Data Quality
+# signatures (ids 5711-5833, contiguous -- matches the known Eastern (79) +
+# Western (44) datasource split). This is short of the 157 total Data
+# Quality signatures seen via the site's internal API during research (a
+# handful of non-PMU sensor types apparently exist but weren't discoverable
+# through this documented endpoint by any sensor/datasource value tried --
+# not investigated further, since 123 real, independently-labeled signatures
+# is already a solid negative-control pool).
+#
+# Excluded the 14 TIMING_SIGNATURES ids from those 123, then
+# random.seed(42); random.sample(remaining_109, 15) -- one-off, reproducible
+# only via this exact recorded procedure (the live sample call isn't kept in
+# the codebase).
+NEGATIVE_CONTROL_SIGIDS: tuple[int, ...] = (
+    5716, 5717, 5725, 5728, 5729, 5732, 5745, 5748, 5752, 5772, 5787, 5795, 5801, 5806, 5814,
+)
