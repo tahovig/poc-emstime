@@ -86,3 +86,75 @@ both channels start at the same timestamp and sample rate with no dropouts
 in this early slice. These `*_partial.csv` files are real LBNL-collected
 values (not synthetic) — they stay under `data/raw/`, gitignored, same as
 the full files.
+
+# Data: GESL (Grid Event Signature Library)
+
+Source: ORNL/PNNL-hosted, DOE-funded repository of real US utility PMU
+measurements (https://gesl.ornl.gov). Used for external validation against
+real, independently-labeled data — see the top-level `README.md`'s
+"External Validation (GESL)" section for the actual results. No stated
+redistribution license was found — same policy as LBNL: not committed,
+not redistributed.
+
+Not committed: `data/gesl/raw/` is gitignored. Re-fetch with
+`poc_emstime.gesl_client.download_signature(sigid)` (requires real
+`GESL_EMAIL`/`GESL_APIKEY` in a repo-root `.env`, see `.env.example`).
+
+## Confirmed real schema (verified against real downloads)
+
+A downloaded signature is an outer zip containing a metadata CSV plus one
+nested inner zip; the inner zip holds one wide-format CSV per signature:
+
+```
+Time, P001_df, P001_f, P001_ip_a, P001_ip_m, P001_vp_a, P001_vp_m, P002_...
+0.0,   ...
+0.033, ...
+```
+
+- `Time` — float **seconds relative to signature start** (not an absolute
+  epoch like LBNL). Observed sample rate ~30Hz for PMU-sourced signatures,
+  not LBNL's fixed 120Hz — `gesl_validate.py` infers `freq_ns` per signature
+  from the median `Time` delta rather than assuming a fixed rate.
+- Per-PMU suffixes: `_df` (frequency deviation), `_f` (frequency), `_ip_a`
+  /`_ip_m` (positive-seq current angle/magnitude), `_vp_a`/`_vp_m` (positive-
+  seq voltage angle/magnitude). Some PMUs unexpectedly carry an extra
+  `_status` column absent from others in the same file — column layout is
+  **not uniform per PMU**; `gesl_parse.load_signature_channel` looks up by
+  exact header name, never by position.
+- Real source data can contain a literal `inf` value (confirmed: signature
+  5732, "outliers preceding missing data") — `gesl_parse.extract_pmu_frame`
+  normalizes `inf`/`-inf` to `NaN` at parse time so every downstream
+  consumer gets the same "no usable reading" representation the rest of
+  the pipeline already understands.
+
+Ground truth is **whole-signature-level** (the entire multi-minute clip
+carries a tag like `Instrument::Timing::Frequency`), not a precise
+`(start, end)` sub-window the way this project's own injected LBNL faults
+are labeled — hence `evaluate.signature_level_recall`, a coarser
+"was anything in this whole clip flagged" check, rather than
+`window_level_recall`.
+
+## API quirks (documented endpoint: `POST /api/apps/gesl`, `{email, apikey, output, ...}`)
+
+- `output: "eventtags"` always returns the main **Event Signatures**
+  taxonomy (public library, physical disturbances only), never the
+  **Data Quality** library's tag hierarchy — regardless of the `sigtype`
+  filter. The Data Quality tag IDs and the 14 real Timing signature IDs
+  used here were only discoverable via the site's own undocumented
+  internal API (session-JWT login), used once for research and not
+  depended on going forward.
+- `output: "sigids"` rejects a request with no filter at all (400
+  `"Invalid or no criteria option(s) in request"`). `sensor: ["PMU"]` is a
+  valid filter and returns all 123 PMU-sourced Data Quality signatures
+  (contiguous ids 5711-5833) — short of the 157 total seen via the internal
+  API; no filter value tried surfaced the remaining non-PMU signatures
+  through the documented endpoint.
+
+## Fixture data policy
+
+`code/tests/fixtures/gesl_sample_pmu_frame.csv` is **synthetic**, matching
+this confirmed schema (including the `_status` wrinkle on one PMU only).
+The outer/inner zip nesting itself is built **in-memory inside each test**
+(`zipfile.ZipFile(io.BytesIO(), ...)`) rather than as a committed binary —
+more conservative than even the LBNL fixture policy above, since GESL's
+redistribution terms are unverified.

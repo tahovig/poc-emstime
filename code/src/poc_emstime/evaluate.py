@@ -49,3 +49,12 @@ def window_level_recall(index: pd.DatetimeIndex, labels_df: pd.DataFrame, y_pred
             continue
         results[fault_type] = bool(y_pred[mask].any())
     return results
+
+
+def signature_level_recall(y_pred: np.ndarray) -> bool:
+    """Was anything at all flagged in this clip? The coarsest possible
+    version of window_level_recall's "was it caught at all" question, for
+    ground truth that only labels a whole signature (e.g. GESL's real
+    Data Quality tags) rather than a precise (start, end) sub-window -- so
+    there's no window to compute a mask against, only the full y_pred."""
+    return bool(y_pred.any())
