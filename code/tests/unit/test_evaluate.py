@@ -2,7 +2,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from poc_emstime.evaluate import ground_truth_mask, score, score_by_fault_type, window_level_recall
+from poc_emstime.evaluate import (
+    ground_truth_mask,
+    score,
+    score_by_fault_type,
+    signature_level_recall,
+    window_level_recall,
+)
 
 
 def test_score_matches_hand_computed_precision_recall_f1():
@@ -57,3 +63,13 @@ def test_window_level_recall_credits_a_single_flagged_row_in_a_wide_window():
     assert per_row["clock_step"] == pytest.approx(0.25)
     assert window_level["clock_step"] is True
     assert window_level["dropout"] is False
+
+
+def test_signature_level_recall_true_if_anything_flagged():
+    y_pred = np.array([False, False, True, False])
+    assert signature_level_recall(y_pred) is True
+
+
+def test_signature_level_recall_false_if_nothing_flagged():
+    y_pred = np.array([False, False, False])
+    assert signature_level_recall(y_pred) is False
