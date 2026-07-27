@@ -143,9 +143,77 @@ becomes necessary, but wasn't pursued since nothing was blocking on it.
 
 Scaling further (the full 120M-row dataset, or a distributed/chunked
 rewrite) is deferred — 1-day real-data validation plus the earlier
-same-hour test is considered sufficient evidence for Phase 1. External
-validation against labeled real GPS-clock-error data (GESL) is also
-deferred to a later phase.
+same-hour test is considered sufficient evidence for Phase 1.
+
+## External Validation (GESL)
+
+Every result above uses ground truth this project injected itself
+(`faults.py`) into real LBNL data — the detector was tuned against faults
+it was also graded on. The [Grid Event Signature Library
+(GESL)](https://gesl.ornl.gov), an ORNL/PNNL-hosted, DOE-funded repository
+of real US utility PMU data, provides a "Data Quality Library" of 157
+signatures with human-assigned tags — including a real
+`Instrument::Timing::*` category for genuine GPS/clock-error examples
+(leap-second insertions, clock drift, periodic voltage-angle jumps). These
+labels are independent of this project, so they test generalization rather
+than confirm a fit against its own synthetic faults. See `data/README.md`
+for the confirmed real file format and API details.
+
+**Method:** 14 real `Instrument::Timing::*`-tagged signatures (positive
+set) plus 15 non-Timing signatures sampled from GESL's Data Quality library
+(negative control), spanning Eastern and Western Interconnection PMU data.
+Each signature's tagged measurement channels (positives) or every available
+channel (negative controls) run independently through the existing
+pipeline (`ingest` → `features` → an `IsolationForest` per channel, sample
+rate inferred per signature), and a signature counts as "flagged" if any
+checked channel trips (`evaluate.signature_level_recall`).
+
+**Result:**
+
+| | signatures | flagged |
+|---|---|---|
+| Timing (positive)  | 14 | 14 (100%) |
+| Negative control    | 15 | 15 (100%) |
+
+At the channel level the story is the same either way: 91-100% of channels
+were flagged in every signature checked, timing and negative control alike.
+
+**This is not a validated detector — it's a validated blind spot.** 100%
+recall paired with a 100% false-positive rate means the whole-signature
+"any channel flagged" test has zero discriminative power here. Root cause:
+`IsolationForest(contamination=0.01)` is refit *independently per channel,
+per signature*. Contamination is relative, not absolute — it forces
+roughly the most-extreme 1% of *that specific channel's own data* to be
+labeled anomalous, whether or not the channel is actually broken. Any
+channel with enough rows gets ~1% of its rows called "anomalous" by
+construction, regardless of ground truth. (The same mechanism was already
+visible in the Scaling result above — "contamination flags ~1% of all
+rows... by construction" — but its consequence for a whole-signature
+yes/no verdict wasn't obvious until testing against completely unrelated
+real data made it impossible to miss.)
+
+A real fix — e.g. a shared baseline model fit once on known-clean data and
+applied to new signatures, rather than refitting contamination
+independently per signature — is scoped as follow-on work, not attempted
+here. This validation's job was to test whether the detector's design
+generalizes to real, independently-labeled data, and it did that job: it
+surfaced a real limitation rather than papering over one.
+
+What surprised us along the way:
+- GESL's documented `output: "eventtags"` API always returns the public
+  Event Signatures taxonomy, never the Data Quality tag hierarchy,
+  regardless of the `sigtype` filter — the real tag IDs and signature IDs
+  used here were only discoverable via the site's own undocumented
+  internal API.
+- The documented `sigids` endpoint rejects a request with no filter at all;
+  `sensor: ["PMU"]` turned out to be the filter that worked.
+- Real GESL data isn't always clean, even outside the categories meant to
+  flag that: signature 5732 ("outliers preceding missing data") contains a
+  literal `inf` value in its raw CSV, which crashed the pipeline until
+  parsing was patched to normalize non-finite values to `NaN`.
+- GESL's per-PMU column layout isn't uniform — some PMUs in the same file
+  carry an extra `_status` column absent from others, so channel lookup
+  must be by exact header name, never by position.
 
 ## App / Reporting Layer
 

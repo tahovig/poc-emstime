@@ -85,6 +85,20 @@ def test_status_column_does_not_interfere_with_other_pmu_lookups(sample_outer_zi
     assert not f.equals(vp_a)
 
 
+def test_extract_pmu_frame_normalizes_inf_to_nan(tmp_path):
+    # Confirmed against real signature 5732 ("outliers preceding missing
+    # data"): GESL's source CSVs can contain a literal inf value -- a real
+    # data-quality artifact, not something this project injects.
+    csv_bytes = b"Time,P001_f\n0,60.0\n0.033,inf\n0.067,60.1\n"
+    zip_path = tmp_path / "sigId-998.zip"
+    zip_path.write_bytes(_build_outer_zip(csv_bytes, sigid=998))
+
+    frame = gesl_parse.extract_pmu_frame(zip_path)
+
+    assert frame["P001_f"].isna().sum() == 1
+    assert not any(pd.api.types.is_float(v) and v in (float("inf"), float("-inf")) for v in frame["P001_f"])
+
+
 def test_extract_pmu_frame_raises_clearly_on_missing_nested_zip(tmp_path):
     bad_zip = tmp_path / "sigId-000-broken.zip"
     with zipfile.ZipFile(bad_zip, "w") as z:

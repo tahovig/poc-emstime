@@ -12,6 +12,7 @@ import io
 import zipfile
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 # Arbitrary anchor, not real wall-clock time: GESL's `Time` column is float
@@ -43,6 +44,16 @@ def extract_pmu_frame(outer_zip_path: Path) -> pd.DataFrame:
     frame = frame.set_index(GESL_EPOCH_ANCHOR + pd.to_timedelta(frame["Time"], unit="s"))
     frame = frame.drop(columns=["Time"])
     frame.index.name = "Time"
+
+    # Confirmed against real data (sigid 5732, an "outliers preceding missing
+    # data" signature): GESL's source CSVs can contain a literal inf value --
+    # a genuine data-quality artifact in the raw measurement, not something
+    # this project injects. Every downstream consumer (StandardScaler,
+    # IsolationForest, rolling stats) requires finite input, and the rest of
+    # this pipeline already has a well-defined way to represent "no usable
+    # reading here": NaN. Normalizing at parse time means every consumer gets
+    # that for free instead of each one needing its own inf guard.
+    frame = frame.replace([np.inf, -np.inf], np.nan)
     return frame
 
 
