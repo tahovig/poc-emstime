@@ -129,3 +129,25 @@ TIMING_SIGNATURES: tuple[SignatureRef, ...] = (
 NEGATIVE_CONTROL_SIGIDS: tuple[int, ...] = (
     5716, 5717, 5725, 5728, 5729, 5732, 5745, 5748, 5752, 5772, 5787, 5795, 5801, 5806, 5814,
 )
+
+# Baseline-training pool for the follow-on fix: a "known normal" reference
+# set used to *fit* a per-measurement-type IsolationForest once (never
+# scored/tested itself), so real test signatures can be scored against a
+# fixed cutoff instead of a fresh contamination-relative one each time (see
+# gesl_validate.fit_baseline_pipelines). Strictly disjoint from both
+# TIMING_SIGNATURES and NEGATIVE_CONTROL_SIGIDS, so the existing 15-signature
+# negative-control result stays a true held-out test set.
+#
+# Caveat carried forward deliberately: these are "not tagged Timing," not
+# "verified perfectly clean" -- they can still carry other Data Quality tags
+# (missing data, quantization, etc.).
+#
+# Same PMU-sourced pool as NEGATIVE_CONTROL_SIGIDS (ids 5711-5833, confirmed
+# contiguous via `sensor: ["PMU"]`), with both existing sets excluded:
+# candidates = set(range(5711, 5834)) - TIMING_SIGNATURES_ids - NEGATIVE_CONTROL_SIGIDS
+# (94 remaining), then random.seed(42); random.sample(candidates, 20) --
+# one-off, reproducible only via this exact recorded procedure.
+BASELINE_TRAIN_SIGIDS: tuple[int, ...] = (
+    5718, 5719, 5731, 5734, 5736, 5740, 5750, 5753, 5754, 5755,
+    5758, 5762, 5782, 5796, 5802, 5804, 5809, 5811, 5816, 5821,
+)
