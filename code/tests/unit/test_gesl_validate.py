@@ -79,3 +79,28 @@ def test_run_validation_reports_recall_and_fp_rate(sample_outer_zip, monkeypatch
     assert len(results["negative_control_results"]) == 1
     assert results["timing_recall"] in (0.0, 1.0)
     assert results["negative_control_fp_rate"] in (0.0, 1.0)
+
+
+def test_fit_baseline_pipelines_groups_channels_by_suffix(sample_outer_zip, monkeypatch):
+    monkeypatch.setattr(gesl_validate.gesl_client, "download_signature", lambda sigid, **kw: sample_outer_zip)
+    monkeypatch.setattr(gesl_validate, "BASELINE_TRAIN_SIGIDS", (999,))
+
+    baseline_models = gesl_validate.fit_baseline_pipelines(window=3, contamination=0.1)
+
+    assert set(baseline_models) == {"_f", "_vp_a"}
+    for pipeline in baseline_models.values():
+        assert hasattr(pipeline, "predict")
+
+
+def test_fit_baseline_pipelines_pools_every_matching_channel(sample_outer_zip, monkeypatch):
+    monkeypatch.setattr(gesl_validate.gesl_client, "download_signature", lambda sigid, **kw: sample_outer_zip)
+    monkeypatch.setattr(gesl_validate, "BASELINE_TRAIN_SIGIDS", (999,))
+
+    baseline_models = gesl_validate.fit_baseline_pipelines(window=3, contamination=0.1)
+
+    # 3 PMUs each report _f and _vp_a (P002 additionally has _status, which
+    # _channel_suffixes already excludes) -- all 15 fixture rows survive
+    # regularize/rolling cleanup for every channel, so each suffix's pooled
+    # fit set is 3 channels x 15 rows.
+    assert baseline_models["_f"].named_steps["scaler"].n_samples_seen_ == 45
+    assert baseline_models["_vp_a"].named_steps["scaler"].n_samples_seen_ == 45

@@ -16,8 +16,16 @@ anything, not on one named measurement.
 
 from dataclasses import dataclass
 
+import numpy as np
+from sklearn.pipeline import Pipeline
+
 from poc_emstime import evaluate, features, gesl_client, gesl_parse, ingest, model
-from poc_emstime.gesl_manifest import NEGATIVE_CONTROL_SIGIDS, SignatureRef, TIMING_SIGNATURES
+from poc_emstime.gesl_manifest import (
+    BASELINE_TRAIN_SIGIDS,
+    NEGATIVE_CONTROL_SIGIDS,
+    SignatureRef,
+    TIMING_SIGNATURES,
+)
 
 
 @dataclass
@@ -128,3 +136,44 @@ def run_validation(window: int = 10, contamination: float = 0.01) -> dict:
             else 0.0
         ),
     }
+
+
+def fit_baseline_pipelines(window: int = 10, contamination: float = 0.01) -> dict[str, Pipeline]:
+    """Pools every available channel of each measurement-type suffix (_f,
+    _vp_a, etc.) across BASELINE_TRAIN_SIGIDS, then fits one IsolationForest
+    per suffix via model.fit_pipeline -- a "known normal" reference that
+    evaluate_signature_against_baseline scores real test signatures against
+    with model.score_anomalies (predict only, never refit). Unlike
+    evaluate_signature()'s per-channel fit_predict, this calibrates
+    contamination once, against a fixed baseline, rather than fresh against
+    whatever data each test channel happens to contain.
+
+    One model per suffix, not one universal model: a frequency channel and
+    a voltage-angle channel have entirely different scales/distributions,
+    so pooling across suffixes would blur the baseline meaninglessly.
+    """
+    suffix_arrays: dict[str, list[np.ndarray]] = {}
+
+    for sigid in BASELINE_TRAIN_SIGIDS:
+        zip_path = gesl_client.download_signature(sigid)
+        frame = gesl_parse.extract_pmu_frame(zip_path)
+        freq_ns = int(frame.index.to_series().diff().median().value)
+
+        for pmu_prefix in gesl_parse.list_pmu_prefixes(frame):
+            for suffix in _channel_suffixes(frame, pmu_prefix):
+                series = gesl_parse.load_signature_channel(frame, pmu_prefix, suffix)
+                if series is None:
+                    continue
+                channel_name = f"{pmu_prefix}{suffix}"
+                channel_df = _channel_features(series.rename(channel_name), freq_ns, window)
+                if channel_df is None:
+                    continue
+                suffix_arrays.setdefault(suffix, []).append(
+                    channel_df[_feature_cols(channel_name)].values
+                )
+
+    baseline_models: dict[str, Pipeline] = {}
+    for suffix, arrays in suffix_arrays.items():
+        X = np.vstack(arrays)
+        baseline_models[suffix] = model.fit_pipeline(model.build_pipeline(contamination=contamination), X)
+    return baseline_models
