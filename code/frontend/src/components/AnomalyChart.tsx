@@ -80,6 +80,27 @@ export default function AnomalyChart({ chart }: Props) {
               ctx.fillRect(x0, u.bbox.top, Math.max(x1 - x0, 1), u.bbox.height);
             }
             ctx.restore();
+
+            // One persistent label per fault window (not per anomaly dot --
+            // a real run's n_anomalies_full can be in the thousands, so
+            // per-dot labels would be unreadable clutter). Drawn at a fixed
+            // row near the top of the plot area so labels never collide
+            // with the data line as it moves up and down; no collision
+            // avoidance between labels themselves, since the fault spec
+            // spaces windows evenly and this hasn't been an issue in
+            // practice.
+            ctx.save();
+            ctx.fillStyle = "#dc2626";
+            ctx.font = "600 11px system-ui, -apple-system, sans-serif";
+            ctx.textAlign = "center";
+            const labelY = u.bbox.top + 12;
+            faultWindowRanges.forEach(([start, end], i) => {
+              const x0 = u.valToPos(start, "x", true);
+              const x1 = u.valToPos(end, "x", true);
+              const midX = Math.min(Math.max((x0 + x1) / 2, u.bbox.left), u.bbox.left + u.bbox.width);
+              ctx.fillText(chart.fault_windows[i].fault_type, midX, labelY);
+            });
+            ctx.restore();
           },
         ],
         setCursor: [
