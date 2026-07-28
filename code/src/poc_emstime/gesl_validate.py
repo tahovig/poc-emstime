@@ -40,25 +40,40 @@ def _channel_suffixes(frame, pmu_prefix: str) -> list[str]:
     )
 
 
-def _evaluate_channel(series, freq_ns: int, window: int, contamination: float) -> bool:
+def _channel_features(series, freq_ns: int, window: int):
+    """Engineers the same feature set _evaluate_channel always has: gap
+    features -> regularize -> rolling stats -> clean up. Returns None if too
+    little real data survived regularization to fit anything meaningful --
+    not evidence of an anomaly, just an unusable channel. Shared by both the
+    per-channel fit_predict path and the baseline-pooling path, so the two
+    approaches are judged on identically engineered features."""
     col = series.name
     channel_df = series.to_frame(col)
     channel_df = ingest.add_gap_features(channel_df)
     channel_df = ingest.regularize(channel_df, freq_ns=freq_ns)
     channel_df = features.add_delta_and_rolling(channel_df, col, window)
 
-    feature_cols = [col, f"{col}_Delta", f"{col}_Rolling_Std", f"{col}_Dev_From_Mean", "Time_Delta_ms"]
     rolling_cols = [f"{col}_Delta", f"{col}_Rolling_Std", f"{col}_Dev_From_Mean"]
     channel_df[rolling_cols] = channel_df[rolling_cols].fillna(0.0)
     channel_df = channel_df.dropna(subset=[col, "Time_Delta_ms"])
 
     if len(channel_df) < 2:
-        # Too little real data survived regularization to fit anything
-        # meaningful -- not evidence of an anomaly, just an unusable channel.
+        return None
+    return channel_df
+
+
+def _feature_cols(col: str) -> list[str]:
+    return [col, f"{col}_Delta", f"{col}_Rolling_Std", f"{col}_Dev_From_Mean", "Time_Delta_ms"]
+
+
+def _evaluate_channel(series, freq_ns: int, window: int, contamination: float) -> bool:
+    col = series.name
+    channel_df = _channel_features(series, freq_ns, window)
+    if channel_df is None:
         return False
 
     pipeline = model.build_pipeline(contamination=contamination)
-    y_pred = model.detect_anomalies(pipeline, channel_df[feature_cols].values)
+    y_pred = model.detect_anomalies(pipeline, channel_df[_feature_cols(col)].values)
     return evaluate.signature_level_recall(y_pred)
 
 

@@ -40,3 +40,20 @@ def detect_anomalies(pipeline: Pipeline, X) -> np.ndarray:
     True where IsolationForest flags the row as anomalous."""
     raw = pipeline.fit_predict(X)
     return raw == -1
+
+
+def fit_pipeline(pipeline: Pipeline, X) -> Pipeline:
+    """Fits only, no prediction — for callers with their own separate
+    baseline/test split, where contamination should be calibrated once
+    against a "known normal" reference set and reused, rather than being
+    re-derived fresh (relative to whatever data it happens to see) on every
+    call the way detect_anomalies()'s fit_predict does."""
+    pipeline.fit(X)
+    return pipeline
+
+
+def score_anomalies(pipeline: Pipeline, X) -> np.ndarray:
+    """Scores against an already-fitted pipeline (see fit_pipeline) — never
+    refits. Returns a bool array, True where flagged anomalous."""
+    raw = pipeline.predict(X)
+    return raw == -1
