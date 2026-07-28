@@ -215,6 +215,62 @@ What surprised us along the way:
   carry an extra `_status` column absent from others, so channel lookup
   must be by exact header name, never by position.
 
+### Follow-on fix: baseline-relative scoring
+
+The fix scoped as future work above — fit each measurement type's
+`IsolationForest` once on a "known normal" reference (20 non-Timing
+signatures, held disjoint from both the 14 Timing signatures and the 15
+negative controls above), then score every test channel against that fixed
+cutoff via `.predict()` instead of refitting `contamination` fresh per
+channel.
+
+**Result:**
+
+| | old (per-channel `fit_predict`) | new (baseline `.predict()`) |
+|---|---|---|
+| Timing recall       | 14/14 (100%) | 7/14 (50%) |
+| Negative-control FP rate | 15/15 (100%) | 15/15 (100%) |
+
+**This did not fix the false-positive problem — it just made the detector
+stricter.** Recall dropped (some real clock-error signatures no longer
+clear the fixed bar), but every negative control is still flagged. Digging
+into the channel-level flag rate (not just "any channel") explains why, and
+uncovers a second, more specific problem:
+
+| suffix | flagged / checked |
+|---|---|
+| `_ip_a` (current angle)   | 306/310 (98.7%) |
+| `_df` (freq. deviation)   | 43/172 (25.0%) |
+| `_ip_m` (current mag.)    | 42/169 (24.9%) |
+| `_vp_m` (voltage mag.)    | 42/170 (24.7%) |
+| `_vp_a` (voltage angle)   | 67/339 (19.8%) |
+| `_f` (frequency)          | 53/296 (17.9%) |
+
+Positive-sequence current *angle* is flagged almost universally, while
+every other suffix — including voltage angle — sits in a plausible
+17-25% range. The likely reason: current-angle values are inherently
+site/load-relative (they depend on local power factor and the direction of
+real/reactive power flow at that specific point), so pooling raw absolute
+`_ip_a` values across 20 different physical PMU sites as one "normal"
+reference doesn't transfer the way a near-universal quantity like frequency
+does. Excluding `_ip_a` entirely still leaves 11/15 negative controls
+flagged (73%, down from 100%) — a real improvement, but confirming this
+isn't the whole story: the "any single channel out of possibly hundreds"
+aggregation itself keeps saturating, since even a well-calibrated ~1-2%
+per-channel rate is nearly certain to hit *somewhere* once enough channels
+are scanned.
+
+**Honest verdict:** this is genuine progress (channel-level discrimination
+went from a flat 91-100% everywhere to a real 18-99% spread that varies
+meaningfully by measurement type), but it is not a validated detector
+either. Two compounding, now well-understood problems remain, scoped as
+further follow-on work rather than attempted here: (1) per-PMU-relative
+channels like current angle need normalization before pooling across
+sites, not a shared absolute-value baseline; (2) "any channel out of N"
+is the wrong aggregation once N is large — a graded score (e.g. fraction
+of channels flagged, or a threshold on that fraction) is a more honest
+signature-level verdict than a single `any()`.
+
 ## App / Reporting Layer
 
 A FastAPI backend + React/TypeScript SPA on top of the Phase 1 pipeline —
