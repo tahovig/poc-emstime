@@ -104,3 +104,65 @@ def test_fit_baseline_pipelines_pools_every_matching_channel(sample_outer_zip, m
     # fit set is 3 channels x 15 rows.
     assert baseline_models["_f"].named_steps["scaler"].n_samples_seen_ == 45
     assert baseline_models["_vp_a"].named_steps["scaler"].n_samples_seen_ == 45
+
+
+def test_evaluate_signature_against_baseline_never_refits(sample_outer_zip, monkeypatch):
+    # The statistical claim -- scoring clean data against a fixed baseline
+    # doesn't force a ~contamination% flag rate the way fit_predict does --
+    # is proven properly (with a large, genuinely random sample) in
+    # test_model.py. This fixture's 3 near-identical synthetic ramps are too
+    # small/homogeneous to demonstrate that statistically (whatever gets
+    # flagged in one near-duplicate channel tends to recur in all of them).
+    # What's specific to evaluate_signature_against_baseline and worth
+    # testing here is the structural guarantee: it must never refit the
+    # baseline it was handed, only score against it.
+    monkeypatch.setattr(gesl_validate.gesl_client, "download_signature", lambda sigid, **kw: sample_outer_zip)
+    monkeypatch.setattr(gesl_validate, "BASELINE_TRAIN_SIGIDS", (999,))
+    baseline_models = gesl_validate.fit_baseline_pipelines(window=3, contamination=0.1)
+    seen_before = {suffix: p.named_steps["scaler"].n_samples_seen_ for suffix, p in baseline_models.items()}
+
+    def _boom(*a, **k):
+        raise AssertionError("evaluate_signature_against_baseline must not refit the baseline")
+
+    monkeypatch.setattr(gesl_validate.model, "fit_pipeline", _boom)
+
+    sig = SignatureRef(999, "Test Source", "test", ())
+    result = gesl_validate.evaluate_signature_against_baseline(sig, baseline_models, window=3)
+
+    assert result.n_channels_checked == 6
+    # The scaler's sample count is a proxy for "was this refit": predict()
+    # never calls partial_fit, so it must stay exactly what it was after
+    # fit_baseline_pipelines() ran, not grow to include the scored data.
+    for suffix, pipeline in baseline_models.items():
+        assert pipeline.named_steps["scaler"].n_samples_seen_ == seen_before[suffix]
+
+
+def test_evaluate_signature_against_baseline_skips_suffixes_without_a_baseline_model(
+    sample_outer_zip, monkeypatch
+):
+    monkeypatch.setattr(gesl_validate.gesl_client, "download_signature", lambda sigid, **kw: sample_outer_zip)
+    monkeypatch.setattr(gesl_validate, "BASELINE_TRAIN_SIGIDS", (999,))
+    baseline_models = gesl_validate.fit_baseline_pipelines(window=3, contamination=0.1)
+    del baseline_models["_vp_a"]  # simulate a suffix with no baseline coverage
+
+    sig = SignatureRef(999, "Test Source", "test", ())
+    result = gesl_validate.evaluate_signature_against_baseline(sig, baseline_models, window=3)
+
+    assert set(result.channel_flagged) == {"P001_f", "P002_f", "P003_f"}
+    assert result.n_channels_checked == 3
+
+
+def test_run_baseline_validation_reports_recall_and_fp_rate(sample_outer_zip, monkeypatch):
+    monkeypatch.setattr(gesl_validate.gesl_client, "download_signature", lambda sigid, **kw: sample_outer_zip)
+    monkeypatch.setattr(gesl_validate, "BASELINE_TRAIN_SIGIDS", (999,))
+    monkeypatch.setattr(
+        gesl_validate, "TIMING_SIGNATURES", (SignatureRef(999, "Test Source", "test", ("_f",)),)
+    )
+    monkeypatch.setattr(gesl_validate, "NEGATIVE_CONTROL_SIGIDS", (999,))
+
+    results = gesl_validate.run_baseline_validation(window=3, contamination=0.1)
+
+    assert len(results["timing_results"]) == 1
+    assert len(results["negative_control_results"]) == 1
+    assert results["timing_recall"] in (0.0, 1.0)
+    assert results["negative_control_fp_rate"] in (0.0, 1.0)

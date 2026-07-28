@@ -177,3 +177,81 @@ def fit_baseline_pipelines(window: int = 10, contamination: float = 0.01) -> dic
         X = np.vstack(arrays)
         baseline_models[suffix] = model.fit_pipeline(model.build_pipeline(contamination=contamination), X)
     return baseline_models
+
+
+def _score_channel_against_baseline(series, freq_ns: int, window: int, pipeline: Pipeline) -> bool:
+    col = series.name
+    channel_df = _channel_features(series, freq_ns, window)
+    if channel_df is None:
+        return False
+
+    y_pred = model.score_anomalies(pipeline, channel_df[_feature_cols(col)].values)
+    return evaluate.signature_level_recall(y_pred)
+
+
+def evaluate_signature_against_baseline(
+    sig: SignatureRef, baseline_models: dict[str, Pipeline], window: int = 10
+) -> SignatureResult:
+    """Same SignatureResult shape as evaluate_signature(), but scores each
+    channel against a fixed, already-fitted baseline_models[suffix] (see
+    fit_baseline_pipelines) instead of fitting a fresh IsolationForest per
+    channel. A channel whose suffix has no baseline model is skipped
+    entirely -- there's nothing to score it against -- same as a channel
+    that doesn't exist on this PMU at all.
+    """
+    zip_path = gesl_client.download_signature(sig.sigid)
+    frame = gesl_parse.extract_pmu_frame(zip_path)
+    pmu_prefixes = gesl_parse.list_pmu_prefixes(frame)
+    freq_ns = int(frame.index.to_series().diff().median().value)
+
+    channel_flagged: dict[str, bool] = {}
+    for pmu_prefix in pmu_prefixes:
+        suffixes = sig.columns or _channel_suffixes(frame, pmu_prefix)
+        for suffix in suffixes:
+            if suffix not in baseline_models:
+                continue
+            series = gesl_parse.load_signature_channel(frame, pmu_prefix, suffix)
+            if series is None:
+                continue
+            channel_name = f"{pmu_prefix}{suffix}"
+            channel_flagged[channel_name] = _score_channel_against_baseline(
+                series.rename(channel_name), freq_ns, window, baseline_models[suffix]
+            )
+
+    return SignatureResult(
+        sigid=sig.sigid,
+        source=sig.source,
+        description=sig.description,
+        any_flagged=any(channel_flagged.values()),
+        channel_flagged=channel_flagged,
+        n_channels_checked=len(channel_flagged),
+    )
+
+
+def run_baseline_validation(window: int = 10, contamination: float = 0.01) -> dict:
+    """Same shape as run_validation(), for direct comparison: fits the
+    baseline once (from BASELINE_TRAIN_SIGIDS, never scored/tested itself),
+    then scores the same 14 TIMING_SIGNATURES + 15 NEGATIVE_CONTROL_SIGIDS
+    used in the original per-channel-fit_predict validation."""
+    baseline_models = fit_baseline_pipelines(window=window, contamination=contamination)
+
+    timing_results = [
+        evaluate_signature_against_baseline(sig, baseline_models, window) for sig in TIMING_SIGNATURES
+    ]
+    negative_results = [
+        evaluate_signature_against_baseline(SignatureRef(sigid, "", "", ()), baseline_models, window)
+        for sigid in NEGATIVE_CONTROL_SIGIDS
+    ]
+
+    return {
+        "timing_results": timing_results,
+        "negative_control_results": negative_results,
+        "timing_recall": (
+            sum(r.any_flagged for r in timing_results) / len(timing_results) if timing_results else 0.0
+        ),
+        "negative_control_fp_rate": (
+            sum(r.any_flagged for r in negative_results) / len(negative_results)
+            if negative_results
+            else 0.0
+        ),
+    }
