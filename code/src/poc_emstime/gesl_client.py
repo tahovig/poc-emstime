@@ -10,20 +10,27 @@ import os
 from pathlib import Path
 
 import httpx
-from dotenv import load_dotenv
 
 GESL_API_URL = "https://gesl.ornl.gov/api/apps/gesl"
 REPO_ROOT = Path(__file__).resolve().parents[3]
 GESL_DATA_DIR = REPO_ROOT / "data" / "gesl"
 GESL_RAW_DIR = GESL_DATA_DIR / "raw"
 
-# Loaded at import time (not lazily inside _credentials()) so os.environ is
-# already populated by the time anything -- including a test's skipif
-# condition -- checks for GESL_APIKEY. Safe to call even with no .env
-# present (e.g. in CI): load_dotenv() just returns False and leaves
-# os.environ untouched, and _credentials() raises a clear error later if
-# something actually tries to use the API without credentials.
-load_dotenv(REPO_ROOT / ".env")
+# python-dotenv lives in the optional "gesl" extra, not the base "dev"
+# extra -- gesl_validate.py (and its plain, offline unit tests) import this
+# module too, so an unconditional `from dotenv import load_dotenv` would
+# break `pip install -e ".[dev]"; pytest` for anyone who never installs
+# "gesl". Loaded at import time (not lazily inside _credentials()) so
+# os.environ is already populated by the time anything -- including a
+# test's skipif condition -- checks for GESL_APIKEY; when python-dotenv
+# isn't installed, this is just a no-op (the .env file, if any, silently
+# isn't loaded) rather than a hard ImportError.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(REPO_ROOT / ".env")
+except ImportError:
+    pass
 
 
 def _credentials() -> tuple[str, str]:
