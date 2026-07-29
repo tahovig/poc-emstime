@@ -37,6 +37,16 @@ pip install -e ".[dev]"
 pytest
 ```
 
+This installs and tests the core pipeline only. Two groups of tests need
+more than that:
+- App-layer tests (`tests/app/`) need `pip install -e ".[app,dev]"` — see
+  "Running it" under App / Reporting Layer below.
+- GESL *integration* tests (`tests/integration/test_gesl_*`) need
+  `pip install -e ".[gesl,dev]"` plus real credentials in a repo-root
+  `.env` (copy `.env.example`) — see `data/README.md`. GESL's plain unit
+  tests (parsing/scoring logic against synthetic fixtures, no network
+  access) run fine under `.[dev]` alone.
+
 Real data is not committed (`data/raw/` is gitignored, files are hundreds of
 MB). Fetch with `data/fetch.sh <filename>` — see `data/README.md` for the
 file listing and confirmed schema.
