@@ -166,7 +166,7 @@ def test_run_baseline_validation_reports_recall_and_fp_rate(sample_outer_zip, mo
     assert len(results["negative_control_results"]) == 1
     assert results["timing_recall"] in (0.0, 1.0)
     assert results["negative_control_fp_rate"] in (0.0, 1.0)
-    assert results["threshold"] == 0.1
+    assert results["threshold"] == 0.2
 
 
 def test_signature_result_fraction_flagged():

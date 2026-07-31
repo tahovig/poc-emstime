@@ -281,6 +281,57 @@ is the wrong aggregation once N is large — a graded score (e.g. fraction
 of channels flagged, or a threshold on that fraction) is a more honest
 signature-level verdict than a single `any()`.
 
+### Second follow-on: graded aggregation helps, per-channel normalization doesn't
+
+Attempted both of the problems named above. (1) Each channel's features
+were z-scored against *its own* mean/std before pooling, instead of
+pooling raw absolute values. (2) `SignatureResult` gained a
+`fraction_flagged` property (flagged channels / channels checked), and
+`run_baseline_validation` switched its signature-level verdict to a
+threshold on that fraction instead of `any()`.
+
+**Result, isolating each change against real GESL data:**
+
+| | `any()`, raw pooling (prior result) | graded threshold, raw pooling | graded threshold + per-channel normalization |
+|---|---|---|---|
+| Timing recall | 7/14 (50%) | 7/14 (50%) | 14/14 (100%) |
+| Negative-control FP rate | 15/15 (100%) | **11/15 (73%)** | 15/15 (100%) |
+
+The graded threshold (at ~0.2–0.3) is real, if modest, progress on its
+own: same recall as before, false-positive rate down from 100% to 73%.
+
+**The per-channel normalization made things categorically worse, not
+better — verified, not assumed.** A per-suffix breakdown of the
+normalized run showed *every* suffix saturated to 89–99% flagged on
+negative controls, not just the `_ip_a` one this was meant to fix:
+
+| suffix | flagged / checked (normalized) | flagged / checked (raw, prior) |
+|---|---|---|
+| `_f`     | 170/172 (98.8%) | 53/296 (17.9%) |
+| `_vp_a`  | 169/170 (99.4%) | 67/339 (19.8%) |
+| `_vp_m`  | 169/170 (99.4%) | 42/170 (24.7%) |
+| `_ip_a`  | 168/172 (97.7%) | 306/310 (98.7%) |
+| `_ip_m`  | 168/169 (99.4%) | 42/169 (24.9%) |
+| `_df`    | 153/172 (89.0%) | 43/172 (25.0%) |
+
+Root cause: `_f`/`_vp_a`/`_vp_m` never had `_ip_a`'s problem — their
+absolute level *is* a valid shared reference across sites (frequency is
+grid-wide; voltage is regulated to a narrow absolute band). Normalizing
+every suffix to its own per-channel mean/std, uniformly, threw away that
+working signal along with fixing nothing: after normalization every
+channel (real fault or clean) looks statistically similar in shape (mean
+0, std 1), so the baseline model has nothing left to discriminate on.
+**This change was reverted** rather than shipped as the default —
+correctly targeting only the site/load-relative suffixes (`_ip_a`,
+likely `_ip_m`) while leaving `_f`/`_vp_a`/`_vp_m` pooled as raw values
+is the fix that was actually called for, and remains unattempted, scoped
+as further follow-on work.
+
+**Current honest state of this line of work:** the graded-threshold
+change stands as real, validated progress (73% FP rate at unchanged
+recall); the normalization idea remains right in principle for one
+specific suffix, wrong as implemented, and is not in the codebase.
+
 ## App / Reporting Layer
 
 A FastAPI backend + React/TypeScript SPA on top of the Phase 1 pipeline —

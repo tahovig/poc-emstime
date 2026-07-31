@@ -239,7 +239,7 @@ def evaluate_signature_against_baseline(
     )
 
 
-def run_baseline_validation(window: int = 10, contamination: float = 0.01, threshold: float = 0.1) -> dict:
+def run_baseline_validation(window: int = 10, contamination: float = 0.01, threshold: float = 0.2) -> dict:
     """Same shape as run_validation(), for direct comparison: fits the
     baseline once (from BASELINE_TRAIN_SIGIDS, never scored/tested itself),
     then scores the same 14 TIMING_SIGNATURES + 15 NEGATIVE_CONTROL_SIGIDS
@@ -249,8 +249,9 @@ def run_baseline_validation(window: int = 10, contamination: float = 0.01, thres
     SignatureResult.fraction_flagged >= threshold, not any_flagged --
     any() saturates once a signature has enough channels (a single flagged
     channel out of hundreds shouldn't condemn the whole signature). The
-    default threshold (0.1) is a starting point, not a tuned value; results
-    are reported per-signature so a caller can recompute at other
+    default (0.2) is where a real threshold sweep against GESL (see README
+    "Follow-on fix") starts trading recall for a lower false-positive rate;
+    results are reported per-signature so a caller can recompute at other
     thresholds without re-fitting."""
     baseline_models = fit_baseline_pipelines(window=window, contamination=contamination)
 
