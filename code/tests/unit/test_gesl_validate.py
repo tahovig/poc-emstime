@@ -2,7 +2,6 @@ import io
 import zipfile
 from pathlib import Path
 
-import numpy as np
 import pytest
 
 from poc_emstime import gesl_validate
@@ -151,30 +150,6 @@ def test_evaluate_signature_against_baseline_skips_suffixes_without_a_baseline_m
 
     assert set(result.channel_flagged) == {"P001_f", "P002_f", "P003_f"}
     assert result.n_channels_checked == 3
-
-
-def test_normalize_channel_features_zscores_each_column_independently():
-    # Two "channels'" worth of columns stacked side by side, at very
-    # different absolute scales/offsets (mimicking two PMU sites' _ip_a
-    # levels) -- each column must end up ~0 mean / ~1 std on its own.
-    rng = np.random.default_rng(0)
-    col_a = rng.normal(loc=500.0, scale=50.0, size=200)
-    col_b = rng.normal(loc=-3.0, scale=0.2, size=200)
-    X = np.column_stack([col_a, col_b])
-
-    normalized = gesl_validate._normalize_channel_features(X)
-
-    assert np.allclose(normalized.mean(axis=0), 0.0, atol=1e-8)
-    assert np.allclose(normalized.std(axis=0), 1.0, atol=1e-8)
-
-
-def test_normalize_channel_features_handles_constant_column():
-    X = np.column_stack([np.full(10, 7.0), np.arange(10, dtype=float)])
-
-    normalized = gesl_validate._normalize_channel_features(X)
-
-    assert np.all(np.isfinite(normalized))
-    assert np.allclose(normalized[:, 0], 0.0)
 
 
 def test_run_baseline_validation_reports_recall_and_fp_rate(sample_outer_zip, monkeypatch):

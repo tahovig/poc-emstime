@@ -85,26 +85,6 @@ def _feature_cols(col: str) -> list[str]:
     return [col, f"{col}_Delta", f"{col}_Rolling_Std", f"{col}_Dev_From_Mean", "Time_Delta_ms"]
 
 
-def _normalize_channel_features(X: np.ndarray) -> np.ndarray:
-    """Z-scores every feature column against *this channel's own* mean/std,
-    computed independently per channel rather than the pooled group's.
-
-    Root cause this fixes (see README "Follow-on fix" / F5): pooling raw
-    absolute values across ~20 different PMU sites silently assumes every
-    site's "normal" sits at the same absolute level. That holds for a
-    near-universal quantity like frequency, but not for something
-    site/load-relative like current angle (`_ip_a`), whose typical level
-    depends on that site's own power factor and real/reactive flow
-    direction. Re-expressing every channel in units of its own standard
-    deviations from its own mean removes the absolute-level dependence
-    before channels are ever pooled together.
-    """
-    mean = X.mean(axis=0)
-    std = X.std(axis=0)
-    std = np.where(std == 0, 1.0, std)  # a constant column stays exactly 0 post-centering, not inf/nan
-    return (X - mean) / std
-
-
 def _evaluate_channel(series, freq_ns: int, window: int, contamination: float) -> bool:
     col = series.name
     channel_df = _channel_features(series, freq_ns, window)
@@ -182,10 +162,6 @@ def fit_baseline_pipelines(window: int = 10, contamination: float = 0.01) -> dic
     One model per suffix, not one universal model: a frequency channel and
     a voltage-angle channel have entirely different scales/distributions,
     so pooling across suffixes would blur the baseline meaninglessly.
-
-    Each channel is z-scored against its own mean/std (see
-    _normalize_channel_features) before pooling, not pooled as raw absolute
-    values -- see that function's docstring for why.
     """
     suffix_arrays: dict[str, list[np.ndarray]] = {}
 
@@ -204,7 +180,7 @@ def fit_baseline_pipelines(window: int = 10, contamination: float = 0.01) -> dic
                 if channel_df is None:
                     continue
                 suffix_arrays.setdefault(suffix, []).append(
-                    _normalize_channel_features(channel_df[_feature_cols(channel_name)].values)
+                    channel_df[_feature_cols(channel_name)].values
                 )
 
     baseline_models: dict[str, Pipeline] = {}
@@ -220,8 +196,7 @@ def _score_channel_against_baseline(series, freq_ns: int, window: int, pipeline:
     if channel_df is None:
         return False
 
-    X = _normalize_channel_features(channel_df[_feature_cols(col)].values)
-    y_pred = model.score_anomalies(pipeline, X)
+    y_pred = model.score_anomalies(pipeline, channel_df[_feature_cols(col)].values)
     return evaluate.signature_level_recall(y_pred)
 
 
