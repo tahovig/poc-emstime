@@ -191,3 +191,50 @@ def test_run_baseline_validation_reports_recall_and_fp_rate(sample_outer_zip, mo
     assert len(results["negative_control_results"]) == 1
     assert results["timing_recall"] in (0.0, 1.0)
     assert results["negative_control_fp_rate"] in (0.0, 1.0)
+    assert results["threshold"] == 0.1
+
+
+def test_signature_result_fraction_flagged():
+    result = gesl_validate.SignatureResult(
+        sigid=1,
+        source="s",
+        description="d",
+        any_flagged=True,
+        channel_flagged={"a": True, "b": True, "c": False, "d": False},
+        n_channels_checked=4,
+    )
+
+    assert result.fraction_flagged == 0.5
+
+
+def test_signature_result_fraction_flagged_with_no_channels_checked():
+    result = gesl_validate.SignatureResult(
+        sigid=1, source="s", description="d", any_flagged=False, channel_flagged={}, n_channels_checked=0,
+    )
+
+    assert result.fraction_flagged == 0.0
+
+
+def test_run_baseline_validation_threshold_filters_lone_flagged_channels(sample_outer_zip, monkeypatch):
+    monkeypatch.setattr(gesl_validate.gesl_client, "download_signature", lambda sigid, **kw: sample_outer_zip)
+    monkeypatch.setattr(gesl_validate, "BASELINE_TRAIN_SIGIDS", (999,))
+    monkeypatch.setattr(
+        gesl_validate, "TIMING_SIGNATURES", (SignatureRef(999, "Test Source", "test", ()),)
+    )
+    monkeypatch.setattr(gesl_validate, "NEGATIVE_CONTROL_SIGIDS", (999,))
+
+    # Force exactly 1 of every 6 channels checked (empty columns -> all 6
+    # non-status channels in the fixture) "flagged", regardless of what the
+    # real model would say -- pins fraction_flagged at a known 1/6 (~0.167)
+    # for every signature scored, so the threshold's filtering behavior is
+    # deterministic rather than depending on IsolationForest's own output.
+    flags = iter([True, False, False, False, False, False] * 10)
+    monkeypatch.setattr(gesl_validate, "_score_channel_against_baseline", lambda *a, **k: next(flags))
+
+    lenient = gesl_validate.run_baseline_validation(window=3, contamination=0.1, threshold=0.1)
+    strict = gesl_validate.run_baseline_validation(window=3, contamination=0.1, threshold=0.5)
+
+    assert lenient["timing_recall"] == 1.0  # 1/6 = 0.167 >= 0.1
+    assert lenient["negative_control_fp_rate"] == 1.0
+    assert strict["timing_recall"] == 0.0  # 1/6 = 0.167 < 0.5
+    assert strict["negative_control_fp_rate"] == 0.0
