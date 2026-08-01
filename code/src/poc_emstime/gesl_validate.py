@@ -37,6 +37,17 @@ class SignatureResult:
     channel_flagged: dict[str, bool]
     n_channels_checked: int
 
+    @property
+    def fraction_flagged(self) -> float:
+        """Fraction of checked channels flagged -- a graded alternative to
+        any_flagged. any() saturates once enough channels are scanned (a
+        well-calibrated ~1-2% per-channel rate is nearly certain to hit
+        *somewhere* across hundreds of channels); this lets a caller apply
+        its own threshold instead of collapsing straight to a single bit."""
+        if not self.n_channels_checked:
+            return 0.0
+        return sum(self.channel_flagged.values()) / self.n_channels_checked
+
 
 def _channel_suffixes(frame, pmu_prefix: str) -> list[str]:
     """Every non-status measurement suffix this PMU actually reports."""
@@ -228,11 +239,20 @@ def evaluate_signature_against_baseline(
     )
 
 
-def run_baseline_validation(window: int = 10, contamination: float = 0.01) -> dict:
+def run_baseline_validation(window: int = 10, contamination: float = 0.01, threshold: float = 0.2) -> dict:
     """Same shape as run_validation(), for direct comparison: fits the
     baseline once (from BASELINE_TRAIN_SIGIDS, never scored/tested itself),
     then scores the same 14 TIMING_SIGNATURES + 15 NEGATIVE_CONTROL_SIGIDS
-    used in the original per-channel-fit_predict validation."""
+    used in the original per-channel-fit_predict validation.
+
+    Unlike run_validation(), the signature-level verdict here is
+    SignatureResult.fraction_flagged >= threshold, not any_flagged --
+    any() saturates once a signature has enough channels (a single flagged
+    channel out of hundreds shouldn't condemn the whole signature). The
+    default (0.2) is where a real threshold sweep against GESL (see README
+    "Follow-on fix") starts trading recall for a lower false-positive rate;
+    results are reported per-signature so a caller can recompute at other
+    thresholds without re-fitting."""
     baseline_models = fit_baseline_pipelines(window=window, contamination=contamination)
 
     timing_results = [
@@ -246,11 +266,14 @@ def run_baseline_validation(window: int = 10, contamination: float = 0.01) -> di
     return {
         "timing_results": timing_results,
         "negative_control_results": negative_results,
+        "threshold": threshold,
         "timing_recall": (
-            sum(r.any_flagged for r in timing_results) / len(timing_results) if timing_results else 0.0
+            sum(r.fraction_flagged >= threshold for r in timing_results) / len(timing_results)
+            if timing_results
+            else 0.0
         ),
         "negative_control_fp_rate": (
-            sum(r.any_flagged for r in negative_results) / len(negative_results)
+            sum(r.fraction_flagged >= threshold for r in negative_results) / len(negative_results)
             if negative_results
             else 0.0
         ),
