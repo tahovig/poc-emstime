@@ -34,9 +34,18 @@ def decimate_for_chart(
             keep[start + int(np.argmin(bucket_values))] = True
             keep[start + int(np.argmax(bucket_values))] = True
 
-    # Anomalies must never be a decimation casualty -- they're the entire
-    # point of this chart, regardless of which bucket (if any) picked them.
-    keep |= y_pred
+            # An anomaly-containing bucket must never be a decimation
+            # casualty -- but forcing in *every* flagged row (the prior
+            # behavior) makes payload size scale with contamination x row
+            # count instead of max_buckets: at contamination=0.01 on a
+            # 10.37M-row run, that alone was ~103,680 extra points (see
+            # README "Scaling"). One representative flagged row per bucket
+            # keeps every anomalous region visible while bounding total
+            # size to O(max_buckets) regardless of how many rows within a
+            # bucket are flagged.
+            bucket_anomalies = np.nonzero(y_pred[start:end])[0]
+            if len(bucket_anomalies) > 0:
+                keep[start + int(bucket_anomalies[0])] = True
 
     kept_idx = np.nonzero(keep)[0]
 

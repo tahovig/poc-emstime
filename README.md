@@ -370,9 +370,10 @@ dataset, captured by driving the actual running app in a headless browser)*
   anchored to server state, not a decorative animation.
 - **Chart data is server-side decimated** (`app/downsample.py`) once, right
   after scoring, while the full arrays are still in memory — min/max
-  bucketing, with every anomalous row force-included regardless of bucket
-  position, so the browser never has to touch a 10M+-row dataset directly
-  and a real anomaly spike can never be a decimation casualty.
+  bucketing, plus one representative anomalous row force-included per
+  bucket that contains any, so the browser never has to touch a
+  10M+-row dataset directly and no anomaly-containing region can be a
+  decimation casualty.
 - **Frontend** (`code/frontend/`): Vite + React + TypeScript, `uPlot`
   (canvas-rendered, not SVG/DOM-per-point) for the anomaly chart so the
   render layer stays fast at the same scale the backend already protects.
@@ -387,13 +388,16 @@ the progress panel tick correctly through the full single long stage, and
 confirming the completed chart renders cleanly (zero console errors) with
 107,516 of those rows actually sent to the browser.
 
-One real scaling caveat found doing that verification, not yet acted on:
-at `contamination=0.01` on 10.37M rows, ~103,680 rows get flagged anomalous,
-and since the decimator force-includes every one of them, the chart payload
-size scales with `contamination × row count`, not just the nominal bucket
-count — it rendered fine here, but a much larger dataset or higher
-contamination could send far more points than the decimation is nominally
-meant to bound.
+One real scaling caveat found doing that verification, since fixed: at
+`contamination=0.01` on 10.37M rows, ~103,680 rows got flagged anomalous,
+and the decimator used to force-include every one of them, so chart
+payload size scaled with `contamination × row count` instead of the
+nominal bucket count. Fixed by bounding anomaly inclusion to one
+representative row per bucket (still guaranteeing every anomaly-containing
+region is visible) instead of every flagged row. Verified against the
+smaller real 487,667-row run (contamination=0.01, 4,877 rows flagged,
+1.00%): the old behavior would have sent 8,766 points; the fix sends
+4,627 — bounded near `max_buckets`, not the flagged-row count.
 
 ### Running it
 
