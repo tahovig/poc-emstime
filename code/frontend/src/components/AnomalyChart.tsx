@@ -10,6 +10,28 @@ interface Props {
 
 const CHART_HEIGHT = 320;
 
+// Validated with the dataviz skill's palette validator (all-pairs, since
+// this is a scatter chart): with the existing value-line blue (#1d4ed8) and
+// generic-anomaly red (#dc2626) already on the chart, only 3 more hues clear
+// colorblind-safety here -- a 4th collides with something every time. So the
+// 4th fault type (tq_corruption) reuses dropout's hue as a hollow marker
+// (stroke only, no fill) instead of getting its own color -- the skill's own
+// prescribed mitigation for a shared-hue pair: secondary encoding (fill
+// style) rather than color alone.
+const FAULT_TYPE_STYLE: Record<string, { stroke: string; fill: string }> = {
+  dropout: { stroke: "#e87ba4", fill: "#e87ba4" },
+  timestamp_jitter: { stroke: "#eda100", fill: "#eda100" },
+  clock_step: { stroke: "#008300", fill: "#008300" },
+  tq_corruption: { stroke: "#e87ba4", fill: "transparent" },
+};
+const FAULT_TYPES = Object.keys(FAULT_TYPE_STYLE);
+
+// "Other" is every flagged row outside a real fault window -- background
+// noise from contamination (~1% of all rows, by construction). Smaller and
+// lower-opacity than the fault-type dots so it visually recedes instead of
+// competing with them.
+const OTHER_STYLE = { stroke: "rgba(220, 38, 38, 0.55)", fill: "rgba(220, 38, 38, 0.55)" };
+
 // Anomaly dot hit radius in CSS px -- generous enough to hover reliably
 // without needing pixel-perfect aim at a 6px dot.
 const HOVER_HIT_RADIUS = 10;
@@ -41,10 +63,27 @@ export default function AnomalyChart({ chart }: Props) {
     if (!container || !tooltip) return;
 
     const xs = chart.timestamps.map((ms) => ms / 1000); // uPlot's time axis expects seconds
-    const anomalyYs = chart.values.map((v, i) => (chart.anomaly[i] ? v : null));
     const faultWindowRanges = chart.fault_windows.map(
       (w) => [w.start_ms / 1000, w.end_ms / 1000] as const,
     );
+
+    // categorize(idx): which fault type (if any) a flagged row belongs to --
+    // "other" for a flagged row outside every real fault window, null for a
+    // row that isn't flagged at all. Single source of truth shared by both
+    // the per-series data split below and the hover tooltip, instead of two
+    // independent timestamp-range scans.
+    const categorize = (idx: number): string | null => {
+      if (!chart.anomaly[idx]) return null;
+      const ts = chart.timestamps[idx];
+      const window = chart.fault_windows.find((w) => ts >= w.start_ms && ts <= w.end_ms);
+      return window ? window.fault_type : "other";
+    };
+    const categories = chart.timestamps.map((_, i) => categorize(i));
+
+    const faultTypeYs = FAULT_TYPES.map((type) =>
+      chart.values.map((v, i) => (categories[i] === type ? v : null)),
+    );
+    const otherYs = chart.values.map((v, i) => (categories[i] === "other" ? v : null));
 
     const hideTooltip = () => {
       tooltip.style.display = "none";
@@ -57,11 +96,20 @@ export default function AnomalyChart({ chart }: Props) {
       series: [
         {},
         { label: "value", stroke: "#1d4ed8", width: 1, points: { show: false } },
+        ...FAULT_TYPES.map((type) => {
+          const style = FAULT_TYPE_STYLE[type];
+          return {
+            label: type,
+            stroke: style.stroke,
+            width: 0,
+            points: { show: true, size: 8, stroke: style.stroke, fill: style.fill },
+          };
+        }),
         {
-          label: "anomaly",
-          stroke: "#dc2626",
+          label: "other",
+          stroke: OTHER_STYLE.stroke,
           width: 0,
-          points: { show: true, size: 6, stroke: "#dc2626", fill: "#dc2626" },
+          points: { show: true, size: 5, stroke: OTHER_STYLE.stroke, fill: OTHER_STYLE.fill },
         },
       ],
       cursor: {
@@ -80,33 +128,12 @@ export default function AnomalyChart({ chart }: Props) {
               ctx.fillRect(x0, u.bbox.top, Math.max(x1 - x0, 1), u.bbox.height);
             }
             ctx.restore();
-
-            // One persistent label per fault window (not per anomaly dot --
-            // a real run's n_anomalies_full can be in the thousands, so
-            // per-dot labels would be unreadable clutter). Drawn at a fixed
-            // row near the top of the plot area so labels never collide
-            // with the data line as it moves up and down; no collision
-            // avoidance between labels themselves, since the fault spec
-            // spaces windows evenly and this hasn't been an issue in
-            // practice.
-            ctx.save();
-            ctx.fillStyle = "#dc2626";
-            ctx.font = "600 11px system-ui, -apple-system, sans-serif";
-            ctx.textAlign = "center";
-            const labelY = u.bbox.top + 12;
-            faultWindowRanges.forEach(([start, end], i) => {
-              const x0 = u.valToPos(start, "x", true);
-              const x1 = u.valToPos(end, "x", true);
-              const midX = Math.min(Math.max((x0 + x1) / 2, u.bbox.left), u.bbox.left + u.bbox.width);
-              ctx.fillText(chart.fault_windows[i].fault_type, midX, labelY);
-            });
-            ctx.restore();
           },
         ],
         setCursor: [
           (u) => {
             const { left, top, idx } = u.cursor;
-            if (left == null || top == null || left < 0 || top < 0 || idx == null || !chart.anomaly[idx]) {
+            if (left == null || top == null || left < 0 || top < 0 || idx == null) {
               hideTooltip();
               return;
             }
@@ -116,17 +143,41 @@ export default function AnomalyChart({ chart }: Props) {
             // the same space (its `true` variant returns device/canvas
             // pixels, which don't match cursor coordinates 1:1 whenever
             // devicePixelRatio != 1).
-            const pointX = u.valToPos(xs[idx], "x", false);
-            const pointY = u.valToPos(chart.values[idx], "y", false);
-            const dx = left - pointX;
-            const dy = top - pointY;
-            if (dx * dx + dy * dy > HOVER_HIT_RADIUS * HOVER_HIT_RADIUS) {
+            //
+            // u.cursor.idx is uPlot's nearest-X row across ALL rows,
+            // anomalous or not -- when an anomalous row sits close in x to a
+            // differently-categorized (or non-anomalous) neighbor, idx can
+            // snap to the wrong one, permanently hiding the tooltip for a
+            // dot that's clearly visible. Search a small window around idx
+            // for the nearest actually-anomalous row within the hit radius
+            // instead of trusting idx alone.
+            const SEARCH_RADIUS = 8;
+            const lo = Math.max(0, idx - SEARCH_RADIUS);
+            const hi = Math.min(chart.anomaly.length - 1, idx + SEARCH_RADIUS);
+            let bestIdx = -1;
+            let bestDistSq = HOVER_HIT_RADIUS * HOVER_HIT_RADIUS;
+            for (let i = lo; i <= hi; i++) {
+              if (!chart.anomaly[i]) continue;
+              const px = u.valToPos(xs[i], "x", false);
+              const py = u.valToPos(chart.values[i], "y", false);
+              const dx = left - px;
+              const dy = top - py;
+              const distSq = dx * dx + dy * dy;
+              if (distSq <= bestDistSq) {
+                bestDistSq = distSq;
+                bestIdx = i;
+              }
+            }
+
+            if (bestIdx < 0) {
               hideTooltip();
               return;
             }
 
-            const ts = chart.timestamps[idx];
-            const faultWindow = chart.fault_windows.find((w) => ts >= w.start_ms && ts <= w.end_ms);
+            const pointX = u.valToPos(xs[bestIdx], "x", false);
+            const pointY = u.valToPos(chart.values[bestIdx], "y", false);
+            const ts = chart.timestamps[bestIdx];
+            const category = categories[bestIdx];
 
             tooltip.replaceChildren();
             const timeEl = document.createElement("div");
@@ -135,13 +186,13 @@ export default function AnomalyChart({ chart }: Props) {
             tooltip.appendChild(timeEl);
 
             const valueEl = document.createElement("div");
-            valueEl.textContent = `value: ${chart.values[idx].toFixed(3)}`;
+            valueEl.textContent = `value: ${chart.values[bestIdx].toFixed(3)}`;
             tooltip.appendChild(valueEl);
 
-            if (faultWindow) {
+            if (category && category !== "other") {
               const faultEl = document.createElement("div");
               faultEl.className = "anomaly-tooltip__fault";
-              faultEl.textContent = `fault: ${faultWindow.fault_type}`;
+              faultEl.textContent = `fault: ${category}`;
               tooltip.appendChild(faultEl);
             }
 
@@ -172,7 +223,7 @@ export default function AnomalyChart({ chart }: Props) {
       },
     };
 
-    const data: uPlot.AlignedData = [xs, chart.values, anomalyYs];
+    const data: uPlot.AlignedData = [xs, chart.values, ...faultTypeYs, otherYs];
     plotRef.current = new uPlot(opts, data, container);
 
     const handleResize = () => {
