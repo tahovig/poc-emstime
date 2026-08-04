@@ -133,7 +133,7 @@ export default function AnomalyChart({ chart }: Props) {
         setCursor: [
           (u) => {
             const { left, top, idx } = u.cursor;
-            if (left == null || top == null || left < 0 || top < 0 || idx == null || !chart.anomaly[idx]) {
+            if (left == null || top == null || left < 0 || top < 0 || idx == null) {
               hideTooltip();
               return;
             }
@@ -143,17 +143,41 @@ export default function AnomalyChart({ chart }: Props) {
             // the same space (its `true` variant returns device/canvas
             // pixels, which don't match cursor coordinates 1:1 whenever
             // devicePixelRatio != 1).
-            const pointX = u.valToPos(xs[idx], "x", false);
-            const pointY = u.valToPos(chart.values[idx], "y", false);
-            const dx = left - pointX;
-            const dy = top - pointY;
-            if (dx * dx + dy * dy > HOVER_HIT_RADIUS * HOVER_HIT_RADIUS) {
+            //
+            // u.cursor.idx is uPlot's nearest-X row across ALL rows,
+            // anomalous or not -- when an anomalous row sits close in x to a
+            // differently-categorized (or non-anomalous) neighbor, idx can
+            // snap to the wrong one, permanently hiding the tooltip for a
+            // dot that's clearly visible. Search a small window around idx
+            // for the nearest actually-anomalous row within the hit radius
+            // instead of trusting idx alone.
+            const SEARCH_RADIUS = 8;
+            const lo = Math.max(0, idx - SEARCH_RADIUS);
+            const hi = Math.min(chart.anomaly.length - 1, idx + SEARCH_RADIUS);
+            let bestIdx = -1;
+            let bestDistSq = HOVER_HIT_RADIUS * HOVER_HIT_RADIUS;
+            for (let i = lo; i <= hi; i++) {
+              if (!chart.anomaly[i]) continue;
+              const px = u.valToPos(xs[i], "x", false);
+              const py = u.valToPos(chart.values[i], "y", false);
+              const dx = left - px;
+              const dy = top - py;
+              const distSq = dx * dx + dy * dy;
+              if (distSq <= bestDistSq) {
+                bestDistSq = distSq;
+                bestIdx = i;
+              }
+            }
+
+            if (bestIdx < 0) {
               hideTooltip();
               return;
             }
 
-            const ts = chart.timestamps[idx];
-            const category = categories[idx];
+            const pointX = u.valToPos(xs[bestIdx], "x", false);
+            const pointY = u.valToPos(chart.values[bestIdx], "y", false);
+            const ts = chart.timestamps[bestIdx];
+            const category = categories[bestIdx];
 
             tooltip.replaceChildren();
             const timeEl = document.createElement("div");
@@ -162,7 +186,7 @@ export default function AnomalyChart({ chart }: Props) {
             tooltip.appendChild(timeEl);
 
             const valueEl = document.createElement("div");
-            valueEl.textContent = `value: ${chart.values[idx].toFixed(3)}`;
+            valueEl.textContent = `value: ${chart.values[bestIdx].toFixed(3)}`;
             tooltip.appendChild(valueEl);
 
             if (category && category !== "other") {
